@@ -1,17 +1,17 @@
 import type { ServerBuild, AppLoadContext } from "@remix-run/server-runtime";
 import { createRequestHandler as createRemixRequestHandler } from "@remix-run/server-runtime";
 
-export interface CreateRequestHandlerParams<Env = any> {
+export interface CreateFetchHandlerParams<Env = any> {
   build: ServerBuild;
   getLoadContext?: (context: EventContext<Env, any, any>) => AppLoadContext;
   mode?: string;
 }
 
-function createInternalHandler<Env = any>({
+export function createRequestHandler<Env = any>({
   build,
   getLoadContext,
   mode
-}: CreateRequestHandlerParams<Env>): PagesFunction<Env> {
+}: CreateFetchHandlerParams<Env>): PagesFunction<Env> {
   let platform = {};
   let handleRequest = createRemixRequestHandler(build, platform, mode);
 
@@ -30,11 +30,6 @@ type EnvWithAssets = Record<string, unknown> & {
 
 async function handleAsset(request: Request, env: unknown) {
   let envWithAssets = env as EnvWithAssets;
-  if (!envWithAssets?.ASSETS?.fetch) {
-    throw new Error(
-      "env.ASSETS.fetch does not exist, did you forget to upload your assets?"
-    );
-  }
 
   const response = await envWithAssets.ASSETS.fetch(request);
   if (response.ok) return response;
@@ -42,33 +37,26 @@ async function handleAsset(request: Request, env: unknown) {
 
 declare const process: any;
 
-export function createRequestHandler<Env = any>({
+export function createFetchHandler<Env = any>({
   build,
   getLoadContext,
-  mode,
-  disableAssets
-}: CreateRequestHandlerParams<Env> & { disableAssets?: boolean }) {
-  const handleRequest = createInternalHandler<Env>({
+  mode
+}: CreateFetchHandlerParams<Env>) {
+  const handleRequest = createRequestHandler<Env>({
     build,
     getLoadContext,
     mode
   });
 
-  const handleFetch = async (
-    request: Request,
-    env: unknown,
-    context: EventContext<Env, any, any>
-  ) => {
+  const handleFetch = async (context: EventContext<Env, any, any>) => {
     let response: Response | undefined;
 
-    if (!disableAssets) {
-      let url = new URL(request.url);
-      response =
-        // TODO: Remove this once a fix has been meged to wranger@v2
-        (process.env.NODE_ENV === "development" && "") || url.pathname === "/"
-          ? undefined
-          : await handleAsset(request.clone(), env);
-    }
+    let url = new URL(context.request.url);
+    response =
+      // TODO: Remove this once a fix has been meged to wranger@v2
+      process.env.NODE_ENV === "development" && url.pathname === "/"
+        ? undefined
+        : await handleAsset(context.request.clone(), context.env);
 
     if (!response) {
       response = await handleRequest(context);
@@ -79,7 +67,7 @@ export function createRequestHandler<Env = any>({
 
   return async (context: EventContext<Env, any, any>) => {
     try {
-      return await handleFetch(context.request, context.env, context);
+      return await handleFetch(context);
     } catch (e) {
       if (process.env.NODE_ENV === "development" && e instanceof Error) {
         console.error(e);
